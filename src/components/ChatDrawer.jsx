@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageCircle, Send, X } from "lucide-react";
 import { chatApi, propertyApi } from "../services/api";
 import { useChatSocket } from "../chat/useChatSocket";
-import { buildRoomId } from "../chat/chatModel";
+import {
+  buildRoomId,
+  formatChatMessageTime,
+  inferChatStatusFromHistory,
+  normalizeHistory,
+} from "../chat/chatModel";
 
 const USER_CHAT_MEMBERS_KEY = "userChatMembers";
 const DEFAULT_FIRST_MESSAGE = "I am intersting your propery";
@@ -62,14 +67,6 @@ const getInitials = (name) => {
   const a = parts[0]?.[0] || "";
   const b = parts.length > 1 ? parts[parts.length - 1]?.[0] || "" : "";
   return (a + b).toUpperCase();
-};
-
-const formatTime = (value) => {
-  if (!value) return "";
-  const num = Number(value);
-  const d = Number.isFinite(num) ? new Date(num) : new Date(String(value));
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 
 const formatChatStatus = (status) => {
@@ -147,6 +144,28 @@ const normalizeList = (response) => {
   return [];
 };
 
+const resolveRoomId = (item) => {
+  const userId = Number(item?.userId);
+  const ownerId = Number(item?.ownerId);
+  return item?.roomId || buildRoomId(userId, ownerId);
+};
+
+const syncChatStatusFromServer = async (item) => {
+  const roomId = resolveRoomId(item);
+  if (!roomId) return item?.status || "PENDING";
+  try {
+    const res = await chatApi.getHistory(roomId);
+    const history = normalizeHistory(res);
+    const inferred = inferChatStatusFromHistory(history);
+    if (inferred !== (item?.status || "PENDING")) {
+      return { ...item, roomId, status: inferred };
+    }
+    return { ...item, roomId, status: item?.status || inferred };
+  } catch {
+    return { ...item, roomId, status: item?.status || "PENDING" };
+  }
+};
+
 const ChatDrawer = ({
   isOpen,
   onClose,
@@ -212,13 +231,15 @@ const ChatDrawer = ({
         setMembers(combined);
         onCountChange?.(combined.length);
       } else {
-        const userChats = readUserChats()
+        const stored = readUserChats()
           .map((item) => {
             const normalizedUserId = Number(item?.userId);
             const normalizedOwnerId = Number(item?.ownerId);
-            const normalizedRoomId =
-              item?.roomId ||
-              buildRoomId(normalizedUserId, normalizedOwnerId);
+            const normalizedRoomId = resolveRoomId({
+              ...item,
+              userId: normalizedUserId,
+              ownerId: normalizedOwnerId,
+            });
 
             return {
               ...item,
@@ -229,10 +250,23 @@ const ChatDrawer = ({
             };
           })
           .filter(
-          (item) => Number(item?.userId) === Number(currentUserId)
+            (item) => Number(item?.userId) === Number(currentUserId)
           );
-        setMembers(userChats);
-        onCountChange?.(userChats.length);
+
+        const synced = await Promise.all(
+          stored.map((item) => syncChatStatusFromServer(item))
+        );
+        writeUserChats(synced);
+        setMembers(synced);
+        onCountChange?.(synced.length);
+
+        setActiveRoom((prev) => {
+          if (!prev?.roomId) return prev;
+          const match = synced.find(
+            (item) => String(resolveRoomId(item)) === String(prev.roomId)
+          );
+          return match ? { ...prev, ...match } : prev;
+        });
       }
     } catch (e) {
       setError(e?.response?.data?.message || "Failed to load chats");
@@ -298,12 +332,18 @@ const ChatDrawer = ({
             Number(item.ownerId) === Number(ownerId)
         );
         if (existing) {
-          setActiveRoom({
-            ...existing,
-            roomId:
-              existing.roomId ||
-              buildRoomId(Number(currentUserId), Number(ownerId)),
-          });
+          const synced = await syncChatStatusFromServer(existing);
+          const nextStored = readUserChats().map((item) =>
+            Number(item.userId) === Number(currentUserId) &&
+            Number(item.ownerId) === Number(ownerId)
+              ? synced
+              : item
+          );
+          writeUserChats(nextStored);
+          setMembers(nextStored.filter(
+            (item) => Number(item?.userId) === Number(currentUserId)
+          ));
+          setActiveRoom(synced);
           return;
         }
 
@@ -315,12 +355,19 @@ const ChatDrawer = ({
             message: DEFAULT_FIRST_MESSAGE,
           });
           const payload = res?.data?.data || {};
+          const propertyId =
+            resolvedProperty?.id ||
+            resolvedProperty?.propertyId ||
+            selectedProperty?.id ||
+            selectedProperty?.propertyId ||
+            null;
           const created = {
             roomId:
               payload?.roomId ||
               buildRoomId(Number(currentUserId), Number(ownerId)),
             userId: Number(currentUserId),
             ownerId: Number(ownerId),
+            propertyId,
             name:
               getOwnerNameFromProperty(resolvedProperty, ownerId) || "Owner",
             propertyTitle:
@@ -328,7 +375,7 @@ const ChatDrawer = ({
               resolvedProperty?._raw?.title ||
               selectedProperty?.title ||
               "Property",
-            status: "PENDING",
+            status: payload?.status || "PENDING",
           };
           const next = [...readUserChats(), created];
           writeUserChats(next);
@@ -346,24 +393,14 @@ const ChatDrawer = ({
       }
     };
     autoCreateRequest();
-  }, [
-    currentUserId,
-    isOpen,
-    isOwner,
-    onCountChange,
-    refreshMembers,
-    selectedProperty,
-  ]);
+  }, [currentUserId, isOpen, isOwner, onCountChange, selectedProperty]);
 
   const updateUserChatStatusInStorage = useCallback(
     (targetRoomId, nextStatus) => {
       try {
         const current = readUserChats();
         const next = current.map((item) => {
-          const normalizedUserId = Number(item?.userId);
-          const normalizedOwnerId = Number(item?.ownerId);
-          const normalizedRoomId =
-            item?.roomId || buildRoomId(normalizedUserId, normalizedOwnerId);
+          const normalizedRoomId = resolveRoomId(item);
           if (!normalizedRoomId) return item;
 
           if (String(normalizedRoomId) !== String(targetRoomId)) return item;
@@ -381,44 +418,47 @@ const ChatDrawer = ({
     []
   );
 
+  const applyRoomStatus = useCallback(
+    (rid, nextStatus) => {
+      if (!rid) return;
+
+      setMembers((prev) =>
+        prev.map((item) =>
+          String(resolveRoomId(item)) === String(rid)
+            ? { ...item, status: nextStatus }
+            : item
+        )
+      );
+
+      setActiveRoom((prev) =>
+        prev && String(resolveRoomId(prev)) === String(rid)
+          ? { ...prev, status: nextStatus }
+          : prev
+      );
+
+      if (!isOwner) updateUserChatStatusInStorage(rid, nextStatus);
+    },
+    [isOwner, updateUserChatStatusInStorage]
+  );
+
   const handleAcceptedEvent = useCallback(
     (payload) => {
       const rid = payload?.roomId;
       if (!rid) return;
-
-      setActiveRoom((prev) =>
-        prev && String(prev.roomId) === String(rid)
-          ? { ...prev, status: "ACCEPTED" }
-          : prev
-      );
-
+      applyRoomStatus(rid, "ACCEPTED");
       if (isOwner) refreshMembers();
-      else {
-        updateUserChatStatusInStorage(rid, "ACCEPTED");
-        refreshMembers();
-      }
     },
-    [isOwner, refreshMembers, updateUserChatStatusInStorage]
+    [applyRoomStatus, isOwner, refreshMembers]
   );
 
   const handleRejectedEvent = useCallback(
     (payload) => {
       const rid = payload?.roomId;
       if (!rid) return;
-
-      setActiveRoom((prev) =>
-        prev && String(prev.roomId) === String(rid)
-          ? { ...prev, status: "REJECTED" }
-          : prev
-      );
-
+      applyRoomStatus(rid, "REJECTED");
       if (isOwner) refreshMembers();
-      else {
-        updateUserChatStatusInStorage(rid, "REJECTED");
-        refreshMembers();
-      }
     },
-    [isOwner, refreshMembers, updateUserChatStatusInStorage]
+    [applyRoomStatus, isOwner, refreshMembers]
   );
 
   const {
@@ -657,9 +697,15 @@ const ChatDrawer = ({
               members.map((item) => (
                 <button
                   key={item.roomId}
-                  onClick={() => setActiveRoom(item)}
+                  onClick={() =>
+                    setActiveRoom({ ...item, roomId: resolveRoomId(item) })
+                  }
                   className={`w-full text-left px-3 py-3 border-b border-slate-200/70 hover:bg-white/80 transition ${
-                    activeRoom?.roomId === item.roomId ? "bg-white" : ""
+                    activeRoom &&
+                    String(resolveRoomId(activeRoom)) ===
+                      String(resolveRoomId(item))
+                      ? "bg-white"
+                      : ""
                   }`}
                 >
                   <div className="flex items-center gap-3">
@@ -836,7 +882,7 @@ const ChatDrawer = ({
                                   mine ? "text-white/80" : "text-slate-500"
                                 }`}
                               >
-                                {formatTime(message.createdAt)}
+                                {formatChatMessageTime(message.createdAt)}
                               </div>
                             )}
                           </div>

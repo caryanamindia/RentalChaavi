@@ -16,10 +16,14 @@ const parseRoomId = (roomId) => {
   return { userId: Number(match[1]), ownerId: Number(match[2]) };
 };
 
+let messageSeq = 0;
+
 const mergeUniqueById = (prev, nextItem) => {
-  const next = normalizeMessageResponseDTO(nextItem);
+  const next = normalizeMessageResponseDTO(nextItem, messageSeq++);
   if (!next?.id) return prev;
-  if (prev.some((m) => String(m.id) === String(next.id))) return prev;
+  if (prev.some((m) => String(m.id) === String(next.id))) {
+    next.id = `${next.id}-${prev.length}`;
+  }
   return [...prev, next];
 };
 
@@ -33,6 +37,8 @@ export const useChatSocket = ({
   socketUrl = SOCKET_URL,
 }) => {
   const socketRef = useRef(null);
+  const activeRoomIdRef = useRef(roomId);
+  activeRoomIdRef.current = roomId;
 
   const [socketConnected, setSocketConnected] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -44,10 +50,8 @@ export const useChatSocket = ({
 
   const shouldConnect =
     Boolean(isOpen) &&
-    Boolean(roomId) &&
     Number.isFinite(activeUserId) &&
-    activeUserId > 0 &&
-    Boolean(parsedIds);
+    activeUserId > 0;
 
   const setOnline = useCallback(
     async (online) => {
@@ -61,9 +65,20 @@ export const useChatSocket = ({
     [activeUserId]
   );
 
+  const loadRoomHistory = useCallback(async (targetRoomId) => {
+    if (!targetRoomId) return;
+    try {
+      const historyRes = await chatApi.getHistory(String(targetRoomId));
+      const historyList = normalizeHistory(historyRes);
+      setMessages(historyList);
+    } catch {
+      // History is best-effort; new messages will still stream via socket.
+    }
+  }, []);
+
+  // Inbox socket: connect while drawer is open (receive accept/reject even before a room is selected).
   useEffect(() => {
     if (!shouldConnect) {
-      // Cleanup if previously connected.
       if (socketRef.current) {
         try {
           socketRef.current.disconnect();
@@ -72,16 +87,9 @@ export const useChatSocket = ({
         }
         socketRef.current = null;
       }
+      setSocketConnected(false);
       return;
     }
-
-    // Clear stale room state.
-    // Do it async to avoid react-hooks/set-state-in-effect warnings.
-    setTimeout(() => {
-      setMessages([]);
-      setTypingByUserId({});
-      setPresenceByUserId({});
-    }, 0);
 
     const socket = io(socketUrl, {
       transports: ["websocket"],
@@ -93,17 +101,12 @@ export const useChatSocket = ({
 
     socket.on("connect", async () => {
       setSocketConnected(true);
-      socket.emit("join_room", String(roomId));
       await setOnline(true);
 
-      // Load existing messages from REST to match backend contract.
-      // (Backend provides GET /chat/history/{roomId}).
-      try {
-        const historyRes = await chatApi.getHistory(String(roomId));
-        const historyList = normalizeHistory(historyRes);
-        setMessages(historyList);
-      } catch {
-        // History is best-effort; new messages will still stream via socket.
+      const rid = activeRoomIdRef.current;
+      if (rid) {
+        socket.emit("join_room", String(rid));
+        await loadRoomHistory(rid);
       }
     });
 
@@ -113,37 +116,45 @@ export const useChatSocket = ({
     });
 
     socket.on("chat_history", (payload) => {
-      // SocketModule emits List<MessageResponseDTO> directly.
+      const rid = activeRoomIdRef.current;
+      if (!rid) return;
       const list = Array.isArray(payload) ? payload : [];
-      const normalized = list.map(normalizeMessageResponseDTO);
+      const normalized = list.map((dto, i) =>
+        normalizeMessageResponseDTO(dto, i)
+      );
       setMessages(normalized);
     });
 
     socket.on("receive_message", (payload) => {
       if (!payload) return;
-      // Ensure room match (backend should already do this via room operations).
-      if (payload?.roomId && String(payload.roomId) !== String(roomId)) return;
+      const rid = activeRoomIdRef.current;
+      if (!rid) return;
+      if (payload?.roomId && String(payload.roomId) !== String(rid)) return;
       setMessages((prev) => mergeUniqueById(prev, payload));
     });
 
     socket.on("chat_accepted", (payload) => {
-      // AcceptChat sends both: chat_accepted + receive_message for the auto-reply.
-      // So we only update status (avoid duplicate message insertion).
       if (!payload) return;
-      if (payload?.roomId && String(payload.roomId) !== String(roomId)) return;
       onAccepted?.(payload);
     });
 
     socket.on("chat_rejected", (payload) => {
       if (!payload) return;
-      if (payload?.roomId && String(payload.roomId) !== String(roomId)) return;
       onRejected?.(payload);
-      setMessages((prev) => mergeUniqueById(prev, payload));
+      const rid = activeRoomIdRef.current;
+      if (
+        rid &&
+        (!payload?.roomId || String(payload.roomId) === String(rid))
+      ) {
+        setMessages((prev) => mergeUniqueById(prev, payload));
+      }
     });
 
     socket.on("typing", (dto) => {
       if (!dto) return;
-      if (dto?.roomId && String(dto.roomId) !== String(roomId)) return;
+      const rid = activeRoomIdRef.current;
+      if (!rid) return;
+      if (dto?.roomId && String(dto.roomId) !== String(rid)) return;
       const uid = Number(dto?.userId);
       if (!Number.isFinite(uid)) return;
       setTypingByUserId((prev) => ({ ...prev, [uid]: !!dto.typing }));
@@ -173,30 +184,61 @@ export const useChatSocket = ({
     };
   }, [
     shouldConnect,
-    roomId,
     currentRole,
-    currentUserId,
     activeUserId,
     setOnline,
     onAccepted,
     onRejected,
     socketUrl,
+    loadRoomHistory,
   ]);
+
+  // Join active room and load history when selection changes.
+  useEffect(() => {
+    if (!shouldConnect || !roomId || !parsedIds) {
+      setMessages([]);
+      setTypingByUserId({});
+      return;
+    }
+
+    const sock = socketRef.current;
+    if (sock?.connected) {
+      sock.emit("join_room", String(roomId));
+      loadRoomHistory(roomId);
+      return;
+    }
+
+    setMessages([]);
+  }, [shouldConnect, roomId, parsedIds, loadRoomHistory]);
 
   const sendMessage = useCallback(
     async (text) => {
-      if (!text || !parsedIds) return;
+      if (!text || !parsedIds || !roomId) return;
       const msg = String(text).trim();
       if (!msg) return;
 
-      const senderRole = currentRole === "PROPERTY_OWNER" ? "PROPERTY_OWNER" : "USER";
+      const senderRole =
+        currentRole === "PROPERTY_OWNER" ? "PROPERTY_OWNER" : "USER";
 
       const outgoingPayload = {
         userId: parsedIds.userId,
         ownerId: parsedIds.ownerId,
         senderRole,
         message: msg,
+        roomId: String(roomId),
       };
+
+      const optimistic = normalizeMessageResponseDTO(
+        {
+          roomId: String(roomId),
+          senderId: activeUserId,
+          senderRole,
+          message: msg,
+          time: String(Date.now()),
+        },
+        messageSeq++
+      );
+      setMessages((prev) => mergeUniqueById(prev, optimistic));
 
       const sock = socketRef.current;
       if (sock?.connected) {
@@ -204,10 +246,9 @@ export const useChatSocket = ({
         return;
       }
 
-      // Fallback to REST (also works for the first message).
       await chatApi.sendMessage(outgoingPayload);
     },
-    [currentRole, parsedIds]
+    [currentRole, parsedIds, roomId, activeUserId]
   );
 
   const sendTyping = useCallback(
@@ -235,4 +276,3 @@ export const useChatSocket = ({
     sendTyping,
   };
 };
-
