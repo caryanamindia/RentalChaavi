@@ -5,6 +5,8 @@ import {
   normalizeMessageResponseDTO,
   normalizeHistory,
   getSocketQuery,
+  mergeChatMessages,
+  dedupeChatMessageList,
 } from "./chatModel";
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:9092";
@@ -18,15 +20,6 @@ const parseRoomId = (roomId) => {
 
 let messageSeq = 0;
 
-const mergeUniqueById = (prev, nextItem) => {
-  const next = normalizeMessageResponseDTO(nextItem, messageSeq++);
-  if (!next?.id) return prev;
-  if (prev.some((m) => String(m.id) === String(next.id))) {
-    next.id = `${next.id}-${prev.length}`;
-  }
-  return [...prev, next];
-};
-
 export const useChatSocket = ({
   currentRole,
   currentUserId,
@@ -38,6 +31,7 @@ export const useChatSocket = ({
 }) => {
   const socketRef = useRef(null);
   const activeRoomIdRef = useRef(roomId);
+  const historyLoadRef = useRef({ roomId: null, at: 0 });
   activeRoomIdRef.current = roomId;
 
   const [socketConnected, setSocketConnected] = useState(false);
@@ -65,16 +59,35 @@ export const useChatSocket = ({
     [activeUserId]
   );
 
-  const loadRoomHistory = useCallback(async (targetRoomId) => {
-    if (!targetRoomId) return;
-    try {
-      const historyRes = await chatApi.getHistory(String(targetRoomId));
-      const historyList = normalizeHistory(historyRes);
-      setMessages(historyList);
-    } catch {
-      // History is best-effort; new messages will still stream via socket.
-    }
+  const applyHistory = useCallback((list) => {
+    setMessages(dedupeChatMessageList(list));
   }, []);
+
+  const loadRoomHistory = useCallback(
+    async (targetRoomId, { force = false } = {}) => {
+      if (!targetRoomId) return;
+
+      const now = Date.now();
+      const last = historyLoadRef.current;
+      if (
+        !force &&
+        last.roomId === targetRoomId &&
+        now - last.at < 800
+      ) {
+        return;
+      }
+      historyLoadRef.current = { roomId: targetRoomId, at: now };
+
+      try {
+        const historyRes = await chatApi.getHistory(String(targetRoomId));
+        const historyList = normalizeHistory(historyRes);
+        applyHistory(historyList);
+      } catch {
+        // History is best-effort; new messages will still stream via socket.
+      }
+    },
+    [applyHistory]
+  );
 
   // Inbox socket: connect while drawer is open (receive accept/reject even before a room is selected).
   useEffect(() => {
@@ -88,6 +101,7 @@ export const useChatSocket = ({
         socketRef.current = null;
       }
       setSocketConnected(false);
+      historyLoadRef.current = { roomId: null, at: 0 };
       return;
     }
 
@@ -106,7 +120,7 @@ export const useChatSocket = ({
       const rid = activeRoomIdRef.current;
       if (rid) {
         socket.emit("join_room", String(rid));
-        await loadRoomHistory(rid);
+        await loadRoomHistory(rid, { force: true });
       }
     });
 
@@ -122,7 +136,7 @@ export const useChatSocket = ({
       const normalized = list.map((dto, i) =>
         normalizeMessageResponseDTO(dto, i)
       );
-      setMessages(normalized);
+      applyHistory(normalized);
     });
 
     socket.on("receive_message", (payload) => {
@@ -130,7 +144,7 @@ export const useChatSocket = ({
       const rid = activeRoomIdRef.current;
       if (!rid) return;
       if (payload?.roomId && String(payload.roomId) !== String(rid)) return;
-      setMessages((prev) => mergeUniqueById(prev, payload));
+      setMessages((prev) => mergeChatMessages(prev, payload, messageSeq++));
     });
 
     socket.on("chat_accepted", (payload) => {
@@ -146,7 +160,7 @@ export const useChatSocket = ({
         rid &&
         (!payload?.roomId || String(payload.roomId) === String(rid))
       ) {
-        setMessages((prev) => mergeUniqueById(prev, payload));
+        setMessages((prev) => mergeChatMessages(prev, payload, messageSeq++));
       }
     });
 
@@ -181,6 +195,7 @@ export const useChatSocket = ({
       setTypingByUserId({});
       setPresenceByUserId({});
       setOnline(false);
+      historyLoadRef.current = { roomId: null, at: 0 };
     };
   }, [
     shouldConnect,
@@ -191,13 +206,15 @@ export const useChatSocket = ({
     onRejected,
     socketUrl,
     loadRoomHistory,
+    applyHistory,
   ]);
 
-  // Join active room and load history when selection changes.
+  // Join active room when selection changes.
   useEffect(() => {
     if (!shouldConnect || !roomId || !parsedIds) {
       setMessages([]);
       setTypingByUserId({});
+      historyLoadRef.current = { roomId: null, at: 0 };
       return;
     }
 
@@ -228,27 +245,23 @@ export const useChatSocket = ({
         roomId: String(roomId),
       };
 
-      const optimistic = normalizeMessageResponseDTO(
-        {
-          roomId: String(roomId),
-          senderId: activeUserId,
-          senderRole,
-          message: msg,
-          time: String(Date.now()),
-        },
-        messageSeq++
-      );
-      setMessages((prev) => mergeUniqueById(prev, optimistic));
-
       const sock = socketRef.current;
       if (sock?.connected) {
         sock.emit("send_message", outgoingPayload);
         return;
       }
 
-      await chatApi.sendMessage(outgoingPayload);
+      const res = await chatApi.sendMessage(outgoingPayload);
+      const saved = res?.data?.data ?? res?.data ?? outgoingPayload;
+      setMessages((prev) =>
+        mergeChatMessages(
+          prev,
+          { ...saved, roomId: String(roomId), message: msg, senderRole },
+          messageSeq++
+        )
+      );
     },
-    [currentRole, parsedIds, roomId, activeUserId]
+    [currentRole, parsedIds, roomId]
   );
 
   const sendTyping = useCallback(

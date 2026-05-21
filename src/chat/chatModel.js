@@ -94,9 +94,9 @@ export const normalizeMessageResponseDTO = (dto, seq) => {
   const senderId = dto?.senderId ?? null;
   const senderRole = toSafeString(dto?.senderRole || "USER");
   const text = toSafeString(dto?.message || dto?.content || dto?.text || "");
-  const createdAt = toSafeString(dto?.time || "");
+  const createdAt = toSafeString(dto?.time || dto?.createdAt || "");
   const suffix =
-    seq !== undefined && seq !== null ? `-${seq}` : `-${Date.now()}-${Math.random()}`;
+    seq !== undefined && seq !== null ? `-${seq}` : "";
 
   return {
     id: `${roomId || "room"}-${senderId ?? "na"}-${createdAt || "t"}${suffix}`,
@@ -106,6 +106,63 @@ export const normalizeMessageResponseDTO = (dto, seq) => {
     text,
     createdAt,
   };
+};
+
+/** Identity for dedupe (same sender + same text in one room). */
+export const getMessageDedupeKey = (m) => {
+  const room = String(m?.roomId || "");
+  const role = String(m?.senderRole || "").toUpperCase();
+  const text = String(m?.text || m?.message || "").trim();
+  const senderId = m?.senderId ?? "";
+  return `${room}|${role}|${senderId}|${text}`;
+};
+
+/** Optimistic + socket echo usually arrive within a few seconds. */
+const DUPLICATE_WINDOW_MS = 5_000;
+
+export const areChatMessagesDuplicate = (a, b) => {
+  if (getMessageDedupeKey(a) !== getMessageDedupeKey(b)) return false;
+  const ta = parseChatMessageTime(a?.createdAt)?.getTime() ?? 0;
+  const tb = parseChatMessageTime(b?.createdAt)?.getTime() ?? 0;
+  if (!ta || !tb) return true;
+  return Math.abs(ta - tb) <= DUPLICATE_WINDOW_MS;
+};
+
+/** Remove duplicate rows (e.g. REST history + socket echo). */
+export const dedupeChatMessageList = (messages) => {
+  const list = Array.isArray(messages) ? messages : [];
+  const out = [];
+  for (const msg of list) {
+    const dupIdx = out.findIndex((existing) =>
+      areChatMessagesDuplicate(existing, msg)
+    );
+    if (dupIdx >= 0) {
+      const existing = out[dupIdx];
+      const prefer =
+        parseChatMessageTime(msg?.createdAt) &&
+        !parseChatMessageTime(existing?.createdAt)
+          ? msg
+          : existing;
+      out[dupIdx] = prefer;
+      continue;
+    }
+    out.push(msg);
+  }
+  return out;
+};
+
+/** Append or replace — avoids optimistic + socket double render. */
+export const mergeChatMessages = (prev, rawDto, seq) => {
+  const next = normalizeMessageResponseDTO(rawDto, seq);
+  if (!next?.text) return prev;
+
+  const dupIdx = prev.findIndex((m) => areChatMessagesDuplicate(m, next));
+  if (dupIdx >= 0) {
+    const copy = [...prev];
+    copy[dupIdx] = next;
+    return copy;
+  }
+  return [...prev, next];
 };
 
 const extractDataList = (response) => {
