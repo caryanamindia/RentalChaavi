@@ -6,7 +6,7 @@ export const buildRoomId = (userId, ownerId) => {
   const u = Number(userId);
   const o = Number(ownerId);
   if (!Number.isFinite(u) || !Number.isFinite(o)) return null;
-  return `USER_${u}_OWNER_${o}`;
+  return `USER_${u}_OWNER_${o}`;  
 };
 
 export const getSocketQuery = ({ currentRole, currentUserId }) => {
