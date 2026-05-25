@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageCircle, Send, X } from "lucide-react";
-import { chatApi, propertyApi } from "../services/api";
+import api, { chatApi, propertyApi, userProfileApi } from "../services/api";
 import { useChatSocket } from "../chat/useChatSocket";
 import {
   buildRoomId,
   formatChatMessageTime,
+  getUserFullNameFromChatItem,
+  dedupeOwnerChatMembers,
   inferChatStatusFromHistory,
   normalizeHistory,
+  pickDisplayName,
 } from "../chat/chatModel";
 
 const USER_CHAT_MEMBERS_KEY = "userChatMembers";
+const OWNER_CHAT_USER_NAMES_KEY = "ownerChatUserNames";
 const DEFAULT_FIRST_MESSAGE = "I am intersting your propery";
 
 const safeParse = (value, fallback) => {
@@ -125,15 +129,136 @@ const getOwnerNameFromProperty = (property, fallbackOwnerId) => {
   );
 };
 
-const getUserFullNameFromChatItem = (item) => {
-  return (
-    item?.fullName ||
-    item?.userFullName ||
-    item?.user?.fullName ||
-    item?.user?.name ||
-    item?.userName ||
-    item?.name ||
-    "User"
+const readOwnerUserNameCache = () =>
+  safeParse(localStorage.getItem(OWNER_CHAT_USER_NAMES_KEY) || "{}", {});
+
+const cacheOwnerUserName = (userId, name) => {
+  const trimmed = String(name || "").trim();
+  if (!userId || !trimmed) return;
+  const cache = readOwnerUserNameCache();
+  cache[String(userId)] = trimmed;
+  localStorage.setItem(OWNER_CHAT_USER_NAMES_KEY, JSON.stringify(cache));
+};
+
+const getCachedOwnerUserName = (userId) => {
+  const cache = readOwnerUserNameCache();
+  return pickDisplayName(cache[String(userId)]);
+};
+
+const extractUserNameFromHistory = (history, userId) => {
+  const list = Array.isArray(history) ? history : [];
+  for (const msg of list) {
+    if (String(msg?.senderRole || "").toUpperCase() !== "USER") continue;
+    if (userId && Number(msg?.senderId) !== Number(userId)) continue;
+    const name = pickDisplayName(msg?.senderName, msg?.senderFullName);
+    if (name) return name;
+  }
+  return null;
+};
+
+const formatChatPreview = (text) => {
+  const s = String(text || "").trim();
+  if (!s) return "";
+  return s.length > 48 ? `${s.slice(0, 48)}…` : s;
+};
+
+const fetchTenantNameFromMainApi = async (userId) => {
+  const ownerToken = localStorage.getItem("ownerToken");
+  if (!ownerToken || !userId) return null;
+
+  const readers = [
+    async () => {
+      const res = await userProfileApi.getById(userId, ownerToken);
+      return res?.data?.data ?? res?.data;
+    },
+    async () => {
+      const res = await api.get(`/owner/getUserById/${userId}`);
+      return res?.data?.data ?? res?.data;
+    },
+  ];
+
+  for (const read of readers) {
+    try {
+      const data = await read();
+      const name = getUserFullNameFromChatItem(data);
+      if (name) {
+        cacheOwnerUserName(userId, name);
+        return name;
+      }
+    } catch {
+      // Try next source
+    }
+  }
+  return null;
+};
+
+const resolveOwnerChatUserName = async (item) => {
+  const userId = Number(item?.userId);
+  const fromItem = getUserFullNameFromChatItem(item);
+  if (fromItem) {
+    cacheOwnerUserName(userId, fromItem);
+    return fromItem;
+  }
+
+  const cached = getCachedOwnerUserName(userId);
+  if (cached) return cached;
+
+  const fromProfile = await fetchTenantNameFromMainApi(userId);
+  if (fromProfile) return fromProfile;
+
+  const roomId = resolveRoomId(item);
+  if (roomId) {
+    try {
+      const res = await chatApi.getHistory(roomId);
+      const history = normalizeHistory(res);
+      const fromHistory = extractUserNameFromHistory(history, userId);
+      if (fromHistory) {
+        cacheOwnerUserName(userId, fromHistory);
+        return fromHistory;
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
+  if (Number.isFinite(userId) && userId > 0) {
+    return `User #${userId}`;
+  }
+  return "Unknown user";
+};
+
+const mapOwnerChatMember = (item, ownerId, status) => {
+  const userId = Number(item?.userId);
+  const roomId = item?.roomId || buildRoomId(userId, ownerId);
+  const lastMessage = String(item?.lastMessage || "").trim();
+  const name =
+    getUserFullNameFromChatItem(item) ||
+    getCachedOwnerUserName(userId) ||
+    (Number.isFinite(userId) && userId > 0 ? `User #${userId}` : "Unknown user");
+
+  return {
+    roomId,
+    userId,
+    ownerId,
+    name,
+    lastMessage,
+    propertyTitle:
+      item?.propertyTitle ||
+      item?.propertyName ||
+      formatChatPreview(lastMessage) ||
+      "Property inquiry",
+    status,
+    _raw: item,
+  };
+};
+
+const enrichOwnerChatMembers = async (members) => {
+  const deduped = dedupeOwnerChatMembers(members);
+  return Promise.all(
+    deduped.map(async (member) => {
+      const name = await resolveOwnerChatUserName(member);
+      return { ...member, name };
+    })
   );
 };
 
@@ -202,34 +327,31 @@ const ChatDrawer = ({
           chatApi.getAcceptedChats(currentUserId),
           chatApi.getRejectedChats(currentUserId),
         ]);
-        const pending = normalizeList(pendingRes).map((item) => ({
-          roomId: item?.roomId || buildRoomId(item?.userId, currentUserId),
-          userId: item?.userId,
-          ownerId: currentUserId,
-          name: getUserFullNameFromChatItem(item),
-          propertyTitle: item?.propertyTitle || "Property",
-          status: "PENDING",
-        }));
-        const accepted = normalizeList(acceptedRes).map((item) => ({
-          roomId: item?.roomId || buildRoomId(item?.userId, currentUserId),
-          userId: item?.userId,
-          ownerId: currentUserId,
-          name: getUserFullNameFromChatItem(item),
-          propertyTitle: item?.propertyTitle || "Property",
-          status: "ACCEPTED",
-        }));
-        const rejected = normalizeList(rejectedRes).map((item) => ({
-          roomId: item?.roomId || buildRoomId(item?.userId, currentUserId),
-          userId: item?.userId,
-          ownerId: currentUserId,
-          name: getUserFullNameFromChatItem(item),
-          propertyTitle: item?.propertyTitle || "Property",
-          status: "REJECTED",
-        }));
+        const pending = normalizeList(pendingRes).map((item) =>
+          mapOwnerChatMember(item, currentUserId, "PENDING")
+        );
+        const accepted = normalizeList(acceptedRes).map((item) =>
+          mapOwnerChatMember(item, currentUserId, "ACCEPTED")
+        );
+        const rejected = normalizeList(rejectedRes).map((item) =>
+          mapOwnerChatMember(item, currentUserId, "REJECTED")
+        );
 
-        const combined = [...pending, ...accepted, ...rejected];
+        const combined = await enrichOwnerChatMembers([
+          ...pending,
+          ...accepted,
+          ...rejected,
+        ]);
         setMembers(combined);
         onCountChange?.(combined.length);
+
+        setActiveRoom((prev) => {
+          if (!prev?.roomId) return prev;
+          const match = combined.find(
+            (item) => String(resolveRoomId(item)) === String(prev.roomId)
+          );
+          return match ? { ...prev, ...match } : prev;
+        });
       } else {
         const stored = readUserChats()
           .map((item) => {
@@ -478,6 +600,33 @@ const ChatDrawer = ({
   });
 
   useEffect(() => {
+    if (!isOwner || !activeRoom?.userId) return;
+    const userId = Number(activeRoom.userId);
+    for (const msg of messages) {
+      if (String(msg?.senderRole || "").toUpperCase() !== "USER") continue;
+      const name = pickDisplayName(msg?.senderName);
+      if (!name) continue;
+      cacheOwnerUserName(userId, name);
+      setActiveRoom((prev) =>
+        prev && Number(prev.userId) === userId ? { ...prev, name } : prev
+      );
+      setMembers((prev) =>
+        prev.map((m) =>
+          Number(m.userId) === userId ? { ...m, name } : m
+        )
+      );
+      break;
+    }
+  }, [messages, isOwner, activeRoom?.userId]);
+
+  useEffect(() => {
+    if (isOwner || !activeRoom?.roomId || messages.length === 0) return;
+    const inferred = inferChatStatusFromHistory(messages);
+    if (!inferred || inferred === activeRoom.status) return;
+    applyRoomStatus(resolveRoomId(activeRoom), inferred);
+  }, [messages, isOwner, activeRoom, applyRoomStatus]);
+
+  useEffect(() => {
     return () => {
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
@@ -598,7 +747,28 @@ const ChatDrawer = ({
     }
   };
 
-  const otherDisplayName = activeRoom?.name || (isOwner ? "User" : "Owner");
+  const otherDisplayName = useMemo(() => {
+    if (!activeRoom) return isOwner ? "Select a user" : "Owner";
+    const fromRoom = pickDisplayName(activeRoom?.name);
+    if (fromRoom) return fromRoom;
+    if (isOwner) {
+      const uid = Number(activeRoom?.userId);
+      return (
+        getCachedOwnerUserName(uid) ||
+        (Number.isFinite(uid) && uid > 0 ? `User #${uid}` : "Unknown user")
+      );
+    }
+    return "Owner";
+  }, [activeRoom, isOwner]);
+
+  const isRoomSelected = useCallback(
+    (item) =>
+      Boolean(
+        activeRoom &&
+          String(resolveRoomId(activeRoom)) === String(resolveRoomId(item))
+      ),
+    [activeRoom]
+  );
 
   if (!shouldRender) return null;
 
@@ -694,23 +864,48 @@ const ChatDrawer = ({
             ) : members.length === 0 ? (
               <p className="p-3 text-sm text-slate-500">No chats yet</p>
             ) : (
-              members.map((item) => (
+              members.map((item) => {
+                const selected = isRoomSelected(item);
+                return (
                 <button
                   key={item.roomId}
-                  onClick={() =>
-                    setActiveRoom({ ...item, roomId: resolveRoomId(item) })
-                  }
-                  className={`w-full text-left px-3 py-3 border-b border-slate-200/70 hover:bg-white/80 transition ${
-                    activeRoom &&
-                    String(resolveRoomId(activeRoom)) ===
-                      String(resolveRoomId(item))
-                      ? "bg-white"
-                      : ""
+                  type="button"
+                  onClick={async () => {
+                    const base = { ...item, roomId: resolveRoomId(item) };
+                    if (isOwner) {
+                      const name = await resolveOwnerChatUserName(base);
+                      setActiveRoom({ ...base, name });
+                      return;
+                    }
+                    const synced = await syncChatStatusFromServer(base);
+                    const stored = readUserChats().map((row) =>
+                      String(resolveRoomId(row)) === String(resolveRoomId(synced))
+                        ? { ...row, ...synced }
+                        : row
+                    );
+                    writeUserChats(stored);
+                    setMembers(
+                      stored.filter(
+                        (row) => Number(row.userId) === Number(currentUserId)
+                      )
+                    );
+                    setActiveRoom(synced);
+                  }}
+                  className={`w-full text-left px-3 py-3 border-b border-slate-200/70 transition ${
+                    selected
+                      ? "bg-slate-800 text-white shadow-inner"
+                      : "hover:bg-white/90 text-slate-900"
                   }`}
                 >
                   <div className="flex items-center gap-3">
                     <div className="relative shrink-0">
-                      <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center font-extrabold text-[13px] text-slate-800 shadow-sm">
+                      <div
+                        className={`w-10 h-10 rounded-full border flex items-center justify-center font-extrabold text-[13px] shadow-sm ${
+                          selected
+                            ? "bg-slate-700 border-slate-500 text-white"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      >
                         {getInitials(item.name)}
                       </div>
                       <span
@@ -727,16 +922,26 @@ const ChatDrawer = ({
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-extrabold text-slate-900 truncate">
+                        <p
+                          className={`text-sm font-extrabold truncate ${
+                            selected ? "text-white" : "text-slate-900"
+                          }`}
+                        >
                           {item.name}
                         </p>
                       </div>
-                      <p className="text-[12px] text-slate-500 truncate">
+                      <p
+                        className={`text-[12px] truncate ${
+                          selected ? "text-slate-300" : "text-slate-500"
+                        }`}
+                      >
                         {item.propertyTitle}
                       </p>
                       <p
                         className={`text-[11px] mt-1 font-semibold ${
-                          item.status === "ACCEPTED"
+                          selected
+                            ? "text-slate-200"
+                            : item.status === "ACCEPTED"
                             ? "text-emerald-700"
                             : item.status === "REJECTED"
                             ? "text-rose-700"
@@ -748,7 +953,8 @@ const ChatDrawer = ({
                     </div>
                   </div>
                 </button>
-              ))
+              );
+              })
             )}
           </div>
 
@@ -759,17 +965,46 @@ const ChatDrawer = ({
               </div>
             ) : (
               <>
-                <div className="px-3 py-2.5 border-b border-slate-200 bg-white">
+                <div
+                  className={`px-3 py-2.5 border-b ${
+                    isOwner
+                      ? "border-slate-700 bg-slate-800 text-white"
+                      : "border-slate-200 bg-white"
+                  }`}
+                >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-full bg-slate-900 text-white flex items-center justify-center font-extrabold text-[13px] shadow-sm">
+                      <div
+                        className={`w-10 h-10 rounded-full flex items-center justify-center font-extrabold text-[13px] shadow-sm ${
+                          isOwner
+                            ? "bg-slate-700 border border-slate-500 text-white"
+                            : "bg-slate-900 text-white"
+                        }`}
+                      >
                         {getInitials(otherDisplayName)}
                       </div>
                       <div className="min-w-0">
-                        <p className="font-extrabold text-sm text-slate-900 truncate">
+                        {isOwner && (
+                          <p
+                            className={`text-[10px] font-bold uppercase tracking-wide ${
+                              isOwner ? "text-slate-400" : "text-slate-500"
+                            }`}
+                          >
+                            Chatting with
+                          </p>
+                        )}
+                        <p
+                          className={`font-extrabold text-sm truncate ${
+                            isOwner ? "text-white" : "text-slate-900"
+                          }`}
+                        >
                           {otherDisplayName}
                         </p>
-                        <p className="text-[12px] text-slate-500 truncate">
+                        <p
+                          className={`text-[12px] truncate ${
+                            isOwner ? "text-slate-300" : "text-slate-500"
+                          }`}
+                        >
                           {activeRoom.propertyTitle}
                         </p>
                       </div>
@@ -794,7 +1029,11 @@ const ChatDrawer = ({
                       : false;
 
                     return (
-                      <div className="text-[11px] text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <div
+                        className={`text-[11px] mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 ${
+                          isOwner ? "text-slate-400" : "text-slate-500"
+                        }`}
+                      >
                         {activeRoom.status === "ACCEPTED" && (
                           <p className="inline-flex items-center gap-1">
                             <span
@@ -850,7 +1089,14 @@ const ChatDrawer = ({
                         (isOwner ? "PROPERTY_OWNER" : "USER");
                       const role = String(message.senderRole || "").toUpperCase();
                       const senderName =
-                        role === "PROPERTY_OWNER" ? (isOwner ? myFullName : otherDisplayName) : (isOwner ? otherDisplayName : myFullName);
+                        role === "PROPERTY_OWNER"
+                          ? isOwner
+                            ? myFullName
+                            : otherDisplayName
+                          : isOwner
+                          ? pickDisplayName(message.senderName, otherDisplayName) ||
+                            otherDisplayName
+                          : myFullName;
                       return (
                         <div key={message.id} className="flex items-end gap-2">
                           {!mine && (

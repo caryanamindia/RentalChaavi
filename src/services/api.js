@@ -259,4 +259,14 @@ export const chatApi = {
   getRejectedChats: (ownerId) => chatRequestApi.get(`/chat/rejected/${ownerId}`),
 };
 
+/** Tenant profile (owner inbox uses this because chat list APIs omit fullName). */
+export const userProfileApi = {
+  getById: (userId, authToken) =>
+    api.get(`/user/${userId}`, {
+      headers: authToken
+        ? { Authorization: `Bearer ${authToken}` }
+        : undefined,
+    }),
+};
+
 export default api;
