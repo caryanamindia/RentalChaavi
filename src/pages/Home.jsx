@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Home as HomeIcon,
   Search,
   Star,
   ArrowRight,
@@ -16,6 +15,7 @@ import {
 } from "lucide-react";
 
 import img4 from "../assets/img4.jpg";
+import BrandLogo from "../components/BrandLogo";
 
 const Home = () => {
   const navigate = useNavigate();
@@ -70,7 +70,7 @@ const Home = () => {
         "All properties are verified by our team to ensure authenticity and safety",
     },
     {
-      icon: <HomeIcon size={28} />,
+      icon: <HousePlus size={28} />,
       title: "Direct Connect",
       description:
         "Chat directly with property owners without any middlemen or brokers",
@@ -138,13 +138,7 @@ const Home = () => {
         <div className="px-4 sm:px-6 md:px-9 py-3.5 flex items-center justify-between">
           {/* LOGO */}
           <div className="flex items-center gap-2">
-            <div className="w-9 h-9 bg-[#ff7438] rounded-xl flex items-center justify-center shadow-sm">
-              <HomeIcon size={21} className="text-white" />
-            </div>
-
-            <span className="text-lg sm:text-xl md:text-2xl font-black text-white font-serif whitespace-nowrap">
-              Rental <span className="text-[#ff7438]">Chaavi</span>
-            </span>
+            <BrandLogo size="sm" />
           </div>
 
           {/* DESKTOP NAV */}
@@ -366,7 +360,7 @@ const Home = () => {
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-slate-900 mb-4">
-              Why Choose Rental Chaavi?
+              Why Choose RentalChaavi?
             </h2>
 
             <p className="text-lg md:text-xl text-slate-600 max-w-2xl mx-auto">
@@ -526,7 +520,7 @@ const Home = () => {
                       </p>
 
                       <h3 className="text-2xl font-black">
-                        Rental Chaavi
+                        RentalChaavi
                       </h3>
 
                       <p className="text-sm opacity-90 mt-2">
@@ -608,13 +602,7 @@ const Home = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8 mb-8">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <div className="w-10 h-10 bg-gradient-to-br from-[#ff7f50] to-[#ff9f80] rounded-xl flex items-center justify-center">
-                  <HomeIcon size={24} />
-                </div>
-
-                <span className="text-2xl font-black">
-                  Rental Chaavi
-                </span>
+                <BrandLogo size="md" />
               </div>
 
               <p className="text-slate-400 text-sm">
@@ -662,14 +650,14 @@ const Home = () => {
               <h4 className="font-bold mb-4">Contact</h4>
 
               <ul className="space-y-2 text-slate-400 text-sm">
-                <li>support@caryanam.com</li>
-                <li>+91 98765 43210</li>
+                <li>rentalchaavi@gmail.com</li>
+                <li>+91 94218 73407</li>
               </ul>
             </div>
           </div>
 
           <div className="border-t border-slate-800 pt-8 text-center text-slate-400 text-sm">
-            <p>© 2024 Caryanam. All rights reserved.</p>
+            <p>© 2026 Caryanam. All rights reserved.</p>
           </div>
         </div>
       </footer>

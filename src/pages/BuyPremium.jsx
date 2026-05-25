@@ -132,7 +132,7 @@ toast.info(
         </div>
 
         <h1 className="text-3xl font-bold text-amber-900">
-          Upgrade to Premium
+          Get Direct Owner Access
         </h1>
 
         <p className="text-amber-700 mt-2 mb-6 text-sm">

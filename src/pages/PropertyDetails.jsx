@@ -35,10 +35,12 @@ Car,
 Zap,
 Dumbbell,
 Waves,
-Building2,
-Baby,
+  Building2,
+  Baby,
+  Crown,
 } from "lucide-react";
 
+import BrandLogo from "../components/BrandLogo";
 import { getUserIdFromToken } from "../utlis/authSync";
 import {
   FALLBACK_PROPERTY_IMAGE_DATA_URL,
@@ -106,6 +108,9 @@ const PropertyDetails = () => {
 
   const isPremiumUser =
     premiumStatus === "APPROVED";
+
+  const isPremiumRequestPending =
+    premiumStatus === "PENDING";
 
 
     const [userName, setUserName] =
@@ -780,6 +785,33 @@ if (!cancelled) {
                   {property?.description ||
                     "No description available"}
                 </p>
+
+                {!isPremiumUser && (
+                  <button
+                    type="button"
+                    disabled={isPremiumRequestPending}
+                    onClick={() => {
+                      if (isPremiumRequestPending) return;
+
+                      navigate("/buy-premium");
+                    }}
+                    title={
+                      isPremiumRequestPending
+                        ? "Your premium request is pending admin approval"
+                        : "Buy premium"
+                    }
+                    className={`mt-6 inline-flex items-center justify-center gap-3 rounded-2xl px-6 py-3 text-white font-black shadow-[0_10px_30px_rgba(249,115,22,0.30)] transition-all duration-300 ${
+                      isPremiumRequestPending
+                        ? "cursor-not-allowed bg-slate-600 opacity-70"
+                        : "bg-[#f97316] hover:bg-[#ea6a0a] hover:scale-[1.02]"
+                    }`}
+                  >
+                    <Crown size={20} />
+                    {isPremiumRequestPending
+                      ? "Premium Request Pending"
+                      : "Buy Premium"}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -952,10 +984,7 @@ if (!cancelled) {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <div className="w-10 h-10 bg-gradient-to-br from-[#ff7f50] to-[#ff9f80] rounded-xl flex items-center justify-center">
-                  <span className="text-white font-bold text-lg">C</span>
-                </div>
-                <span className="text-2xl font-black">Rental Chaavi</span>
+                <BrandLogo size="md" />
               </div>
               <p className="text-slate-400 text-sm">
                 India's first no-brokerage platform connecting property owners
@@ -974,13 +1003,13 @@ if (!cancelled) {
             <div>
               <h4 className="font-bold mb-4">Contact</h4>
               <ul className="space-y-2 text-slate-400 text-sm">
-                <li>support@caryanam.com</li>
-                <li>+91 98765 43210</li>
+                <li>rentalchaavi@gmail.com</li>
+                <li>+91 94218 73407</li>
               </ul>
             </div>
           </div>
           <div className="border-t border-slate-800 pt-8 text-center text-slate-400 text-sm">
-            <p> 2024 Caryanam. All rights reserved.</p>
+            <p> 2026 Caryanam. All rights reserved.</p>
           </div>
         </div>
       </footer>

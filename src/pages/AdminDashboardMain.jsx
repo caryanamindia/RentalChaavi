@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { adminModerationApi } from "../services/api";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-import { Building2, Clock,HomeIcon, LogOut, ShieldCheck, Users } from "lucide-react";
+import { Building2, Clock, LogOut, ShieldCheck, Users } from "lucide-react";
+import BrandLogo from "../components/BrandLogo";
 
 const OWNER_APPROVAL_STATUS_KEY = "ownerApprovalStatuses";
 
@@ -125,12 +126,7 @@ const AdminDashboardMain = () => {
     <div className="min-h-screen bg-[#f7f0e8] flex flex-col">
       <div className="flex justify-between items-center gap-2 px-3 sm:px-5 md:px-6 py-3 sm:py-4 bg-black/90 backdrop-blur-md border-b border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.3)] overflow-hidden">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-          <div className="flex h-9 w-9 sm:h-11 sm:w-11 items-center justify-center rounded-[14px] sm:rounded-[18px] bg-[#ff7438] text-white shadow-[0_14px_30px_rgba(255,116,56,0.24)] flex-shrink-0">
-            <HomeIcon size={18} />
-          </div>
-           <span className="min-w-0 truncate text-[15px] min-[360px]:text-[16px] sm:text-xl md:text-2xl font-black text-white font-serif whitespace-nowrap">
-              Rental <span className="text-[#ff7438]">Chaavi</span>
-            </span>
+          <BrandLogo size="sm" />
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
           <button
@@ -306,10 +302,7 @@ const AdminDashboardMain = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                 <div className="flex h-11 w-11 items-center justify-center rounded-[18px] bg-[#ff7438] text-white shadow-[0_14px_30px_rgba(255,116,56,0.24)]">
-            <HomeIcon size={21} />
-          </div>
-                <span className="text-2xl font-black">Rental Chaavi</span>
+                <BrandLogo size="lg" />
               </div>
               <p className="text-slate-400 text-sm">
                 India's first no-brokerage platform connecting property owners
@@ -326,13 +319,13 @@ const AdminDashboardMain = () => {
             <div>
               <h4 className="font-bold mb-4">Contact</h4>
               <ul className="space-y-2 text-slate-400 text-sm">
-                <li>support@caryanam.com</li>
-                <li>+91 98765 43210</li>
+                <li>rentalchaavi@gmail.com</li>
+                <li>+91 94218 73407</li>
               </ul>
             </div>
           </div>
           <div className="border-t border-slate-800 pt-8 text-center text-slate-400 text-sm">
-            <p>&copy; 2024 Caryanam. All rights reserved.</p>
+            <p>&copy; 2026 Caryanam. All rights reserved.</p>
           </div>
         </div>
       </footer>

@@ -12,6 +12,7 @@ import Navbar from "../components/Navbar";
 import Filter from "../components/Filter";
 import PropertyList from "../components/PropertyList";
 import ChatDrawer from "../components/ChatDrawer";
+import BrandLogo from "../components/BrandLogo";
 
 import {
   API_BASE_URL,
@@ -643,54 +644,16 @@ setError(
       {/* FOOTER */}
       <footer className="bg-gradient-to-r from-[#020617] via-[#041833] to-[#020617] text-white py-12 px-4 md:px-6 mt-10">
         <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <div className="w-10 h-10 bg-gradient-to-br from-[#F97316] to-[#FB923C] rounded-xl flex items-center justify-center shadow-lg">
-                  <span className="text-white font-bold text-lg">
-                    C
-                  </span>
-                </div>
-
-                <span className="text-2xl font-black">
-                  Rental Chaavi
-                </span>
+                <BrandLogo size="md" />
               </div>
 
               <p className="text-slate-400 text-sm">
                 India's first no-brokerage platform connecting property owners
                 directly with tenants.
               </p>
-            </div>
-
-            <div>
-              <h4 className="font-bold mb-4 text-white">
-                Quick Links
-              </h4>
-
-              <ul className="space-y-2 text-slate-400 text-sm">
-                <li>
-                  <a
-                    href="/home"
-                    className="hover:text-[#F97316] transition-colors"
-                  >
-                    Home
-                  </a>
-                </li>
-
-                <li>
-                  <a
-                    href="/browse"
-                    className="hover:text-[#F97316] transition-colors"
-                  >
-                    Browse Properties
-                  </a>
-                </li>
-
-                <li>
-                 
-                </li>
-              </ul>
             </div>
 
             <div>
@@ -711,15 +674,15 @@ setError(
               </h4>
 
               <ul className="space-y-2 text-slate-400 text-sm">
-                <li>support@caryanam.com</li>
-                <li>+91 98765 43210</li>
+                <li>rentalchaavi@gmail.com</li>
+                <li>+91 94218 73407</li>
               </ul>
             </div>
           </div>
 
           <div className="border-t border-slate-800 pt-8 text-center text-slate-400 text-sm">
             <p>
-              2024 Caryanam. All rights reserved.
+              2026 Caryanam. All rights reserved.
             </p>
           </div>
         </div>

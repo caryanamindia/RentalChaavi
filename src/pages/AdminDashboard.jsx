@@ -29,10 +29,10 @@ import {
   Ruler,
   Upload,
   Users,
-  HomeIcon
 } from "lucide-react";
 
 import ChatDrawer from "../components/ChatDrawer";
+import BrandLogo from "../components/BrandLogo";
 import {
   FALLBACK_PROPERTY_IMAGE_DATA_URL,
   getImageCandidates,
@@ -2394,12 +2394,7 @@ toast.error(getApiErrorMessage(err, "Failed to update property"));
 
         <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
 
-    <div className="flex h-9 w-9 sm:h-11 sm:w-11 items-center justify-center rounded-[14px] sm:rounded-[18px] bg-[#ff7438] text-white shadow-[0_14px_30px_rgba(255,116,56,0.24)] flex-shrink-0">
-                      <HomeIcon size={18} />
-                    </div>
-                     <span className="min-w-0 truncate text-[15px] min-[360px]:text-[16px] sm:text-xl md:text-2xl font-black text-white font-serif whitespace-nowrap">
-                        Rental <span className="text-[#ff7438]">Chaavi</span>
-                      </span>
+          <BrandLogo size="sm" />
 
         </div>
 
@@ -4548,10 +4543,7 @@ toast.error(getApiErrorMessage(err, "Failed to update property"));
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                 <div className="flex h-11 w-11 items-center justify-center rounded-[18px] bg-[#ff7438] text-white shadow-[0_14px_30px_rgba(255,116,56,0.24)]">
-            <HomeIcon size={21} />
-          </div>
-                <span className="text-2xl font-black">Rental Chaavi</span>
+                <BrandLogo size="lg" />
               </div>
               <p className="text-slate-400 text-sm">
                 India's first no-brokerage platform connecting property owners
@@ -4568,13 +4560,13 @@ toast.error(getApiErrorMessage(err, "Failed to update property"));
             <div>
               <h4 className="font-bold mb-4">Contact</h4>
               <ul className="space-y-2 text-slate-400 text-sm">
-                <li>support@caryanam.com</li>
-                <li>+91 98765 43210</li>
+                <li>rentalchaavi@gmail.com</li>
+                <li>+91 94218 73407</li>
               </ul>
             </div>
           </div>
           <div className="border-t border-slate-800 pt-8 text-center text-slate-400 text-sm">
-            <p>&copy; 2024 Caryanam. All rights reserved.</p>
+            <p>&copy; 2026 Caryanam. All rights reserved.</p>
           </div>
         </div>
       </footer>
